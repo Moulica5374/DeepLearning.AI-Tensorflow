@@ -1,0 +1,1508 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "bFWbEb6uGbN-"
+   },
+   "source": [
+    "# Week 4: Predicting the next word\n",
+    "\n",
+    "Welcome to this assignment! During this week you saw how to create a model that will predict the next word in a text sequence, now you will implement such model and train it using a corpus of [Shakespeare Sonnets](https://www.opensourceshakespeare.org/views/sonnets/sonnet_view.php?range=viewrange&sonnetrange1=1&sonnetrange2=154), while also creating some helper functions to pre-process the data."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false
+   },
+   "source": [
+    "#### TIPS FOR SUCCESSFUL GRADING OF YOUR ASSIGNMENT:\n",
+    "\n",
+    "- All cells are frozen except for the ones where you need to submit your solutions or when explicitly mentioned you can interact with it.\n",
+    "\n",
+    "\n",
+    "- You can add new cells to experiment but these will be omitted by the grader, so don't rely on newly created cells to host your solution code, use the provided places for this.\n",
+    "- You can add the comment # grade-up-to-here in any graded cell to signal the grader that it must only evaluate up to that point. This is helpful if you want to check if you are on the right track even if you are not done with the whole assignment. Be sure to remember to delete the comment afterwards!\n",
+    "- Avoid using global variables unless you absolutely have to. The grader tests your code in an isolated environment without running all cells from the top. As a result, global variables may be unavailable when scoring your submission. Global variables that are meant to be used will be defined in UPPERCASE.\n",
+    "\n",
+    "- To submit your notebook, save it and then click on the blue submit button at the beginning of the page.\n",
+    "\n",
+    "Let's get started!"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 120,
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "BOwsuGQQY9OL",
+    "tags": [
+     "graded"
+    ]
+   },
+   "outputs": [],
+   "source": [
+    "import numpy as np \n",
+    "import matplotlib.pyplot as plt\n",
+    "import tensorflow as tf\n",
+    "import pickle"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 121,
+   "metadata": {
+    "deletable": false,
+    "editable": false
+   },
+   "outputs": [],
+   "source": [
+    "import unittests"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false
+   },
+   "source": [
+    "## Defining some useful global variables\n",
+    "\n",
+    "Next you will define some global variables that will be used throughout the assignment. Feel free to reference them in the upcoming exercises:\n",
+    "\n",
+    "- `FILE_PATH`: The file path where the sonnets file is located. \n",
+    "\n",
+    "- `NUM_BATCHES`: Number of batches. Defaults to 16.\n",
+    "- `LSTM_UNITS`: Number of LSTM units in the LSTM layer.\n",
+    "- `EMBEDDING_DIM`: Number of dimensions in the embedding layer."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 97,
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "tags": [
+     "graded"
+    ]
+   },
+   "outputs": [],
+   "source": [
+    "FILE_PATH = './data/sonnets.txt'\n",
+    "NUM_BATCHES = 16\n",
+    "LSTM_UNITS = 128\n",
+    "EMBEDDING_DIM = 100"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "**A note about grading:**\n",
+    "\n",
+    "**When you submit this assignment for grading these same values for these globals will be used so make sure that all your code works well with these values. After submitting and passing this assignment, you are encouraged to come back here and play with these parameters to see the impact they have in the classification process. Since this next cell is frozen, you will need to copy the contents into a new cell and run it to overwrite the values for these globals.**"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false
+   },
+   "source": [
+    "### Reading the dataset\n",
+    "\n",
+    "For this assignment you will be using the [Shakespeare Sonnets Dataset](https://www.opensourceshakespeare.org/views/sonnets/sonnet_view.php?range=viewrange&sonnetrange1=1&sonnetrange2=154), which contains more than 2000 lines of text extracted from Shakespeare's sonnets."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 122,
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "Pfd-nYKij5yY"
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "There are 2159 lines of sonnets\n",
+      "\n",
+      "The first 5 lines look like this:\n",
+      "\n",
+      "from fairest creatures we desire increase,\n",
+      "that thereby beauty's rose might never die,\n",
+      "but as the riper should by time decease,\n",
+      "his tender heir might bear his memory:\n",
+      "but thou, contracted to thine own bright eyes,\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Read the data\n",
+    "with open(FILE_PATH) as f:\n",
+    "    data = f.read()\n",
+    "\n",
+    "# Convert to lower case and save as a list\n",
+    "corpus = data.lower().split(\"\\n\")\n",
+    "\n",
+    "print(f\"There are {len(corpus)} lines of sonnets\\n\")\n",
+    "print(f\"The first 5 lines look like this:\\n\")\n",
+    "for i in range(5):\n",
+    "  print(corpus[i])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "imB15zrSNhA1"
+   },
+   "source": [
+    "## Exercise 1: fit_vectorizer\n",
+    "\n",
+    "In this exercise, you will use the [tf.keras.layers.TextVectorization layer](https://www.tensorflow.org/api_docs/python/tf/keras/layers/TextVectorization) to tokenize and transform the text into numeric values. \n",
+    "\n",
+    "Note that in this case you will not pad the sentences right now as you've done before, because you need to build the n-grams before padding, so pay attention with the appropriate arguments passed to the TextVectorization layer!\n",
+    "\n",
+    "**Note**:\n",
+    "- You should remove the punctuation and use only lowercase words, so you must pass the correct argument to TextVectorization layer.\n",
+    "\n",
+    "- In this case you will not pad the sentences with the TextVectorization layer as you've done before, because you need to build the n-grams before padding. Remember that by default, the TextVectorization layer will return a Tensor and therefore every element in it must have the same size, so if you pass two sentences of different length to be parsed, they will be padded. If you do not want to do that, you need to either pass the parameter ragged=True, or pass only a single sentence at the time. Later on in the assignment you will build the n-grams and depending on how you will iterate over the sentences, this may be important. If you choose to first pass the entire corpus to the TextVectorization and then perform the iteration, then you should pass ragged=True, otherwise, if you use the TextVectorization on each sentence separately, then you should not worry about it.\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 123,
+   "metadata": {
+    "deletable": false,
+    "tags": [
+     "graded"
+    ]
+   },
+   "outputs": [],
+   "source": [
+    "import tensorflow as tf\n",
+    "\n",
+    "def fit_vectorizer(corpus):\n",
+    "    \"\"\"\n",
+    "    Instantiates the vectorizer class on the corpus\n",
+    "    \n",
+    "    Args:\n",
+    "        corpus (list): List with the sentences.\n",
+    "    \n",
+    "    Returns:\n",
+    "        (tf.keras.layers.TextVectorization): an instance of the TextVectorization class containing the word-index dictionary, adapted to the corpus sentences.\n",
+    "    \"\"\"    \n",
+    "\n",
+    "    tf.keras.utils.set_random_seed(65) # Do not change this line or you may have different expected outputs throughout the assignment\n",
+    "\n",
+    "    ### START CODE HERE ###\n",
+    "\n",
+    "    # Define the object\n",
+    "    vectorizer = tf.keras.layers.TextVectorization(\n",
+    "        standardize='lower_and_strip_punctuation', # Convert to lowercase and remove punctuation\n",
+    "        output_mode='int',  # Convert text into token indices\n",
+    "        ragged=True  # To avoid padding automatically\n",
+    "    )\n",
+    "    \n",
+    "    \n",
+    "    # Adapt it to the corpus\n",
+    "    vectorizer.adapt(corpus)\n",
+    "\n",
+    "\n",
+    "    ### END CODE HERE ###\n",
+    "    \n",
+    "    return vectorizer"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 124,
+   "metadata": {
+    "deletable": false,
+    "editable": false
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Total number of words in corpus (including the out of vocabulary): 3189\n"
+     ]
+    }
+   ],
+   "source": [
+    "vectorizer = fit_vectorizer(corpus)\n",
+    "total_words = len(vectorizer.get_vocabulary())\n",
+    "print(f\"Total number of words in corpus (including the out of vocabulary): {total_words}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false
+   },
+   "source": [
+    "**Expected output:**\n",
+    "\n",
+    "```\n",
+    "Total number of words in corpus (including the out of vocabulary): 3189\n",
+    "```"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "77-0sA46OETa"
+   },
+   "source": [
+    "One thing to note is that you can either pass a string or a list of strings to vectorizer. If you pass the former, it will return a *tensor* whereas if you pass the latter, it will return a *ragged tensor* if you've correctly configured the TextVectorization layer to do so."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 125,
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "tqhPxdeXlfjh"
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Passing a string directly: <tf.Tensor: shape=(5,), dtype=int64, numpy=array([  29,   14,   18,    1, 1679])>\n",
+      "Passing a list of strings: <tf.RaggedTensor [[29, 14, 18, 1, 1679]]>\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(f\"Passing a string directly: {vectorizer('This is a test string').__repr__()}\")\n",
+    "print(f\"Passing a list of strings: {vectorizer(['This is a test string'])}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false
+   },
+   "source": [
+    "**Expected output:**\n",
+    "\n",
+    "```\n",
+    "Passing a string directly: <tf.Tensor: shape=(5,), dtype=int64, numpy=array([  29,   14,   18,    1, 1679])>\n",
+    "Passing a list of strings: <tf.RaggedTensor [[29, 14, 18, 1, 1679]]>\n",
+    "```"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 126,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "\u001b[92m All tests passed!\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Test your code!\n",
+    "unittests.test_fit_vectorizer(fit_vectorizer)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "-oqy9KjXRJ9A"
+   },
+   "source": [
+    "## Generating n-grams\n",
+    "\n",
+    "As you saw in the lecture, the idea now is to generate the n-grams for each sentence in the corpus. So, for instance, if a vectorized sentence is given by `[45, 75, 195, 879]`, you must generate the following vectors:\n",
+    "\n",
+    "```Python\n",
+    "[45, 75]\n",
+    "[45, 75, 195]\n",
+    "[45, 75, 195, 879]\n",
+    "```\n",
+    "## Exercise 2: n_grams_seqs\n",
+    "\n",
+    "Now complete the `n_gram_seqs` function below. This function receives the fitted vectorizer and the corpus (which is a list of strings) and should return a list containing the `n_gram` sequences for each line in the corpus.\n",
+    "\n",
+    "**NOTE:**\n",
+    "\n",
+    "- If you pass `vectorizer(sentence)` the result is not padded, whereas if you pass `vectorizer(list_of_sentences)`, the result won't be padded **only if you passed the argument `ragged = True`** in the TextVectorization setup.\n",
+    "- This exercise directly depends on the previous one, because you need to pass the defined vectorizer as a parameter, so any error thrown in the previous exercise may propagate here."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 127,
+   "metadata": {
+    "deletable": false,
+    "id": "iy4baJMDl6kj",
+    "tags": [
+     "graded"
+    ]
+   },
+   "outputs": [],
+   "source": [
+    "# GRADED FUNCTION: n_gram_seqs\n",
+    "\n",
+    "def n_gram_seqs(corpus, vectorizer):\n",
+    "    \"\"\"\n",
+    "    Generates a list of n-gram sequences\n",
+    "    \n",
+    "    Args:\n",
+    "        corpus (list of string): lines of texts to generate n-grams for\n",
+    "        vectorizer (tf.keras.layers.TextVectorization): an instance of the TextVectorization class adapted in the corpus\n",
+    "    \n",
+    "    Returns:\n",
+    "        (list of tf.int64 tensors): the n-gram sequences for each line in the corpus\n",
+    "    \"\"\"\n",
+    "    input_sequences = []\n",
+    "\n",
+    "    word_indexes = vectorizer(corpus)  # No 'ragged' option, will return padded tensor\n",
+    "\n",
+    "    # Iterate over sentences\n",
+    "    for sentence_tokens in word_indexes:\n",
+    "        # Convert to NumPy and remove padding (zeros) manually\n",
+    "        sentence_array = sentence_tokens.numpy()\n",
+    "        sentence_array = sentence_array[sentence_array > 0]  # Remove padding\n",
+    "\n",
+    "        # Generate n-grams\n",
+    "        for i in range(2, len(sentence_array) + 1):\n",
+    "            input_sequences.append(tf.convert_to_tensor(sentence_array[:i], dtype=tf.int64))\n",
+    "\n",
+    "    return input_sequences\n",
+    "\n",
+    "    ### START CODE HERE ###\n",
+    "  \n",
+    "    \n",
+    "    \n",
+    " "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 128,
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "DlKqW2pfM7G3"
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "n_gram sequences for first example look like this:\n",
+      "\n"
+     ]
+    },
+    {
+     "data": {
+      "text/plain": [
+       "[<tf.Tensor: shape=(2,), dtype=int64, numpy=array([ 35, 489])>,\n",
+       " <tf.Tensor: shape=(3,), dtype=int64, numpy=array([  35,  489, 1259])>,\n",
+       " <tf.Tensor: shape=(4,), dtype=int64, numpy=array([  35,  489, 1259,  164])>,\n",
+       " <tf.Tensor: shape=(5,), dtype=int64, numpy=array([  35,  489, 1259,  164,  230])>,\n",
+       " <tf.Tensor: shape=(6,), dtype=int64, numpy=array([  35,  489, 1259,  164,  230,  582])>]"
+      ]
+     },
+     "execution_count": 128,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "# Test your function with one example\n",
+    "first_example_sequence = n_gram_seqs([corpus[0]], vectorizer)\n",
+    "\n",
+    "print(\"n_gram sequences for first example look like this:\\n\")\n",
+    "first_example_sequence"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "0HL8Ug6UU0Jt"
+   },
+   "source": [
+    "**Expected Output:**\n",
+    "\n",
+    "```\n",
+    "n_gram sequences for first example look like this:\n",
+    "\n",
+    "[<tf.Tensor: shape=(2,), dtype=int64, numpy=array([ 35, 489])>,\n",
+    " <tf.Tensor: shape=(3,), dtype=int64, numpy=array([  35,  489, 1259])>,\n",
+    " <tf.Tensor: shape=(4,), dtype=int64, numpy=array([  35,  489, 1259,  164])>,\n",
+    " <tf.Tensor: shape=(5,), dtype=int64, numpy=array([  35,  489, 1259,  164,  230])>,\n",
+    " <tf.Tensor: shape=(6,), dtype=int64, numpy=array([  35,  489, 1259,  164,  230,  582])>]\n",
+    "```"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 129,
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "wtPpCcBjNc4c"
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "n_gram sequences for next 3 examples look like this:\n",
+      "\n"
+     ]
+    },
+    {
+     "data": {
+      "text/plain": [
+       "[<tf.Tensor: shape=(2,), dtype=int64, numpy=array([  9, 935])>,\n",
+       " <tf.Tensor: shape=(3,), dtype=int64, numpy=array([  9, 935, 143])>,\n",
+       " <tf.Tensor: shape=(4,), dtype=int64, numpy=array([  9, 935, 143, 369])>,\n",
+       " <tf.Tensor: shape=(5,), dtype=int64, numpy=array([  9, 935, 143, 369, 101])>,\n",
+       " <tf.Tensor: shape=(6,), dtype=int64, numpy=array([  9, 935, 143, 369, 101, 171])>,\n",
+       " <tf.Tensor: shape=(7,), dtype=int64, numpy=array([  9, 935, 143, 369, 101, 171, 207])>,\n",
+       " <tf.Tensor: shape=(2,), dtype=int64, numpy=array([17, 23])>,\n",
+       " <tf.Tensor: shape=(3,), dtype=int64, numpy=array([17, 23,  3])>,\n",
+       " <tf.Tensor: shape=(4,), dtype=int64, numpy=array([  17,   23,    3, 1006])>,\n",
+       " <tf.Tensor: shape=(5,), dtype=int64, numpy=array([  17,   23,    3, 1006,   64])>,\n",
+       " <tf.Tensor: shape=(6,), dtype=int64, numpy=array([  17,   23,    3, 1006,   64,   31])>,\n",
+       " <tf.Tensor: shape=(7,), dtype=int64, numpy=array([  17,   23,    3, 1006,   64,   31,   51])>,\n",
+       " <tf.Tensor: shape=(8,), dtype=int64, numpy=array([  17,   23,    3, 1006,   64,   31,   51,  803])>,\n",
+       " <tf.Tensor: shape=(2,), dtype=int64, numpy=array([ 27, 315])>,\n",
+       " <tf.Tensor: shape=(3,), dtype=int64, numpy=array([ 27, 315, 745])>,\n",
+       " <tf.Tensor: shape=(4,), dtype=int64, numpy=array([ 27, 315, 745, 101])>,\n",
+       " <tf.Tensor: shape=(5,), dtype=int64, numpy=array([ 27, 315, 745, 101, 209])>,\n",
+       " <tf.Tensor: shape=(6,), dtype=int64, numpy=array([ 27, 315, 745, 101, 209,  27])>,\n",
+       " <tf.Tensor: shape=(7,), dtype=int64, numpy=array([ 27, 315, 745, 101, 209,  27, 286])>]"
+      ]
+     },
+     "execution_count": 129,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "# Test your function with a bigger corpus\n",
+    "next_3_examples_sequence = n_gram_seqs(corpus[1:4], vectorizer)\n",
+    "\n",
+    "print(\"n_gram sequences for next 3 examples look like this:\\n\")\n",
+    "next_3_examples_sequence"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "EIzecMczU9UB"
+   },
+   "source": [
+    "**Expected Output:**\n",
+    "\n",
+    "```\n",
+    "n_gram sequences for next 3 examples look like this:\n",
+    "\n",
+    "[<tf.Tensor: shape=(2,), dtype=int64, numpy=array([  9, 935])>,\n",
+    " <tf.Tensor: shape=(3,), dtype=int64, numpy=array([  9, 935, 143])>,\n",
+    " <tf.Tensor: shape=(4,), dtype=int64, numpy=array([  9, 935, 143, 369])>,\n",
+    " <tf.Tensor: shape=(5,), dtype=int64, numpy=array([  9, 935, 143, 369, 101])>,\n",
+    " <tf.Tensor: shape=(6,), dtype=int64, numpy=array([  9, 935, 143, 369, 101, 171])>,\n",
+    " <tf.Tensor: shape=(7,), dtype=int64, numpy=array([  9, 935, 143, 369, 101, 171, 207])>,\n",
+    " <tf.Tensor: shape=(2,), dtype=int64, numpy=array([17, 23])>,\n",
+    " <tf.Tensor: shape=(3,), dtype=int64, numpy=array([17, 23,  3])>,\n",
+    " <tf.Tensor: shape=(4,), dtype=int64, numpy=array([  17,   23,    3, 1006])>,\n",
+    " <tf.Tensor: shape=(5,), dtype=int64, numpy=array([  17,   23,    3, 1006,   64])>,\n",
+    " <tf.Tensor: shape=(6,), dtype=int64, numpy=array([  17,   23,    3, 1006,   64,   31])>,\n",
+    " <tf.Tensor: shape=(7,), dtype=int64, numpy=array([  17,   23,    3, 1006,   64,   31,   51])>,\n",
+    " <tf.Tensor: shape=(8,), dtype=int64, numpy=array([  17,   23,    3, 1006,   64,   31,   51,  803])>,\n",
+    " <tf.Tensor: shape=(2,), dtype=int64, numpy=array([ 27, 315])>,\n",
+    " <tf.Tensor: shape=(3,), dtype=int64, numpy=array([ 27, 315, 745])>,\n",
+    " <tf.Tensor: shape=(4,), dtype=int64, numpy=array([ 27, 315, 745, 101])>,\n",
+    " <tf.Tensor: shape=(5,), dtype=int64, numpy=array([ 27, 315, 745, 101, 209])>,\n",
+    " <tf.Tensor: shape=(6,), dtype=int64, numpy=array([ 27, 315, 745, 101, 209,  27])>,\n",
+    " <tf.Tensor: shape=(7,), dtype=int64, numpy=array([ 27, 315, 745, 101, 209,  27, 286])>]\n",
+    "```"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 130,
+   "metadata": {
+    "deletable": false,
+    "editable": false
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "\u001b[92m All tests passed!\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Test your code!\n",
+    "unittests.test_n_gram_seqs(n_gram_seqs)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "dx3V_RjFWQSu"
+   },
+   "source": [
+    "Apply the `n_gram_seqs` transformation to the whole corpus and save the maximum sequence length to use it later:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 131,
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "laMwiRUpmuSd"
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "n_grams of input_sequences have length: 15355\n",
+      "maximum length of sequences is: 11\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Apply the n_gram_seqs transformation to the whole corpus\n",
+    "input_sequences = n_gram_seqs(corpus, vectorizer)\n",
+    "\n",
+    "# Save max length \n",
+    "max_sequence_len = max([len(x) for x in input_sequences])\n",
+    "\n",
+    "print(f\"n_grams of input_sequences have length: {len(input_sequences)}\")\n",
+    "print(f\"maximum length of sequences is: {max_sequence_len}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "2OciMdmEdE9L"
+   },
+   "source": [
+    "**Expected Output:**\n",
+    "\n",
+    "```\n",
+    "n_grams of input_sequences have length: 15355\n",
+    "maximum length of sequences is: 11\n",
+    "```"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "zHY7HroqWq12"
+   },
+   "source": [
+    "## Exercise 3: pad_seqs\n",
+    "\n",
+    "Now code the `pad_seqs` function which will pad any given sequences to the desired maximum length. Notice that this function receives a list of sequences and should return a numpy array with the padded sequences. You may have a look at the documentation of [`tf.keras.utils.pad_sequences`](https://www.tensorflow.org/api_docs/python/tf/keras/utils/pad_sequences). \n",
+    "\n",
+    "**NOTE**: \n",
+    "\n",
+    "- Remember to pass the correct padding method as discussed in the lecture."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 132,
+   "metadata": {
+    "cellView": "code",
+    "deletable": false,
+    "id": "WW1-qAZaWOhC",
+    "tags": [
+     "graded"
+    ]
+   },
+   "outputs": [],
+   "source": [
+    "# GRADED FUNCTION: pad_seqs\n",
+    "from tensorflow.keras.preprocessing.sequence import pad_sequences\n",
+    "\n",
+    "\n",
+    "def pad_seqs(input_sequences, max_sequence_len):\n",
+    "    \"\"\"\n",
+    "    Pads tokenized sequences to the same length\n",
+    "    \n",
+    "    Args:\n",
+    "        input_sequences (list of int): tokenized sequences to pad\n",
+    "        maxlen (int): maximum length of the token sequences\n",
+    "    \n",
+    "    Returns:\n",
+    "        (np.array of int32): tokenized sequences padded to the same length\n",
+    "    \"\"\"\n",
+    "    \n",
+    "    ### START CODE HERE ###\n",
+    "\n",
+    "    padded_sequences = pad_sequences(input_sequences, maxlen=max_sequence_len, padding='pre', dtype='int32')\n",
+    "\n",
+    "\n",
+    "    ### END CODE HERE ###\n",
+    "    \n",
+    "    return np.array(padded_sequences)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 133,
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "IqVQ0pb3YHLr"
+   },
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "array([[   0,    0,    0,    0,   35,  489],\n",
+       "       [   0,    0,    0,   35,  489, 1259],\n",
+       "       [   0,    0,   35,  489, 1259,  164],\n",
+       "       [   0,   35,  489, 1259,  164,  230],\n",
+       "       [  35,  489, 1259,  164,  230,  582]], dtype=int32)"
+      ]
+     },
+     "execution_count": 133,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "# Test your function with the n_grams_seq of the first example\n",
+    "first_padded_seq = pad_seqs(first_example_sequence, max([len(x) for x in first_example_sequence]))\n",
+    "first_padded_seq"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "Re_avDznXRnU"
+   },
+   "source": [
+    "**Expected Output:**\n",
+    "\n",
+    "```\n",
+    "array([[   0,    0,    0,    0,   35,  489],\n",
+    "       [   0,    0,    0,   35,  489, 1259],\n",
+    "       [   0,    0,   35,  489, 1259,  164],\n",
+    "       [   0,   35,  489, 1259,  164,  230],\n",
+    "       [  35,  489, 1259,  164,  230,  582]], dtype=int32)\n",
+    "```"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 134,
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "j56_UCOBYzZt"
+   },
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "array([[   0,    0,    0,    0,    0,    0,    9,  935],\n",
+       "       [   0,    0,    0,    0,    0,    9,  935,  143],\n",
+       "       [   0,    0,    0,    0,    9,  935,  143,  369],\n",
+       "       [   0,    0,    0,    9,  935,  143,  369,  101],\n",
+       "       [   0,    0,    9,  935,  143,  369,  101,  171],\n",
+       "       [   0,    9,  935,  143,  369,  101,  171,  207],\n",
+       "       [   0,    0,    0,    0,    0,    0,   17,   23],\n",
+       "       [   0,    0,    0,    0,    0,   17,   23,    3],\n",
+       "       [   0,    0,    0,    0,   17,   23,    3, 1006],\n",
+       "       [   0,    0,    0,   17,   23,    3, 1006,   64],\n",
+       "       [   0,    0,   17,   23,    3, 1006,   64,   31],\n",
+       "       [   0,   17,   23,    3, 1006,   64,   31,   51],\n",
+       "       [  17,   23,    3, 1006,   64,   31,   51,  803],\n",
+       "       [   0,    0,    0,    0,    0,    0,   27,  315],\n",
+       "       [   0,    0,    0,    0,    0,   27,  315,  745],\n",
+       "       [   0,    0,    0,    0,   27,  315,  745,  101],\n",
+       "       [   0,    0,    0,   27,  315,  745,  101,  209],\n",
+       "       [   0,    0,   27,  315,  745,  101,  209,   27],\n",
+       "       [   0,   27,  315,  745,  101,  209,   27,  286]], dtype=int32)"
+      ]
+     },
+     "execution_count": 134,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "# Test your function with the n_grams_seq of the next 3 examples\n",
+    "next_3_padded_seq = pad_seqs(next_3_examples_sequence, max([len(s) for s in next_3_examples_sequence]))\n",
+    "next_3_padded_seq"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "3rmcDluOXcIU"
+   },
+   "source": [
+    "**Expected Output:**\n",
+    "\n",
+    "```\n",
+    "array([[   0,    0,    0,    0,    0,    0,    9,  935],\n",
+    "       [   0,    0,    0,    0,    0,    9,  935,  143],\n",
+    "       [   0,    0,    0,    0,    9,  935,  143,  369],\n",
+    "       [   0,    0,    0,    9,  935,  143,  369,  101],\n",
+    "       [   0,    0,    9,  935,  143,  369,  101,  171],\n",
+    "       [   0,    9,  935,  143,  369,  101,  171,  207],\n",
+    "       [   0,    0,    0,    0,    0,    0,   17,   23],\n",
+    "       [   0,    0,    0,    0,    0,   17,   23,    3],\n",
+    "       [   0,    0,    0,    0,   17,   23,    3, 1006],\n",
+    "       [   0,    0,    0,   17,   23,    3, 1006,   64],\n",
+    "       [   0,    0,   17,   23,    3, 1006,   64,   31],\n",
+    "       [   0,   17,   23,    3, 1006,   64,   31,   51],\n",
+    "       [  17,   23,    3, 1006,   64,   31,   51,  803],\n",
+    "       [   0,    0,    0,    0,    0,    0,   27,  315],\n",
+    "       [   0,    0,    0,    0,    0,   27,  315,  745],\n",
+    "       [   0,    0,    0,    0,   27,  315,  745,  101],\n",
+    "       [   0,    0,    0,   27,  315,  745,  101,  209],\n",
+    "       [   0,    0,   27,  315,  745,  101,  209,   27],\n",
+    "       [   0,   27,  315,  745,  101,  209,   27,  286]], dtype=int32)\n",
+    "```"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 135,
+   "metadata": {
+    "deletable": false,
+    "editable": false
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "\u001b[92m All tests passed!\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Test your code!\n",
+    "unittests.test_pad_seqs(pad_seqs)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 136,
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "rgK-Q_micEYA"
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "padded corpus has shape: (15355, 11)\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Pad the whole corpus\n",
+    "input_sequences = pad_seqs(input_sequences, max_sequence_len)\n",
+    "\n",
+    "print(f\"padded corpus has shape: {input_sequences.shape}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "id": "59RD1YYNc7CW"
+   },
+   "source": [
+    "**Expected Output:**\n",
+    "\n",
+    "```\n",
+    "padded corpus has shape: (15355, 11)\n",
+    "\n",
+    "```"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "ZbOidyPrXxf7"
+   },
+   "source": [
+    "## Exercise 4: features_and_labels_dataset\n",
+    "\n",
+    "Before feeding the data into the neural network you should split it into features and labels. In this case the features will be the *padded n_gram sequences* with the **last element** removed from them and the labels will be the removed words.\n",
+    "\n",
+    "Complete the `features_and_labels_dataset` function below. This function expects the `padded n_gram sequences` as input and should return a **batched** [tensorflow dataset](https://www.tensorflow.org/api_docs/python/tf/data/Dataset) containing elements in the form (sentence, label). \n",
+    "\n",
+    "\n",
+    "**NOTE**:\n",
+    "- Notice that the function also receives the total of words in the corpus, this parameter will be **very important when one hot encoding the labels** since every word in the corpus will be a label at least once. The function you should use is [`tf.keras.utils.to_categorical`]((https://www.tensorflow.org/api_docs/python/tf/keras/utils/to_categorical)).\n",
+    "- To generate a dataset you may use the function [tf.data.Dataset.from_tensor_slices](https://www.tensorflow.org/api_docs/python/tf/data/Dataset#from_tensor_slices) after obtaining the sentences and their respective labels.\n",
+    "- To batch a dataset, you may call the method [.batch](https://www.tensorflow.org/api_docs/python/tf/data/Dataset#batch). A good number is `16`, but feel free to choose any number you want to, but keep it not greater than 64, otherwise the model may take too many epochs to achieve a good accuracy. Remember this is defined as a global variable."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 137,
+   "metadata": {
+    "cellView": "code",
+    "deletable": false,
+    "id": "9WGGbYdnZdmJ",
+    "tags": [
+     "graded"
+    ]
+   },
+   "outputs": [],
+   "source": [
+    "# GRADED FUNCTION: features_and_labels\n",
+    "import tensorflow as tf\n",
+    "from tensorflow.keras.utils import to_categorical\n",
+    "\n",
+    "def features_and_labels_dataset(input_sequences, total_words):\n",
+    "    \"\"\"\n",
+    "    Generates features and labels from n-grams and returns a tensorflow dataset\n",
+    "    \n",
+    "    Args:\n",
+    "        input_sequences (list of int): sequences to split features and labels from\n",
+    "        total_words (int): vocabulary size\n",
+    "    \n",
+    "    Returns:\n",
+    "        (tf.data.Dataset): Dataset with elements in the form (sentence, label)\n",
+    "    \"\"\"\n",
+    "    ### START CODE HERE ###\n",
+    "\n",
+    "    # Define the features an labels as discussed in the lectures\n",
+    "    features = [seq[:-1] for seq in input_sequences]\n",
+    "    \n",
+    "    # Labels: the last element of each input sequence\n",
+    "    labels = [seq[-1] for seq in input_sequences]\n",
+    "    \n",
+    "    # One hot encode the labels based on the total number of words\n",
+    "    one_hot_labels = tf.keras.utils.to_categorical(labels, num_classes=total_words)\n",
+    "    \n",
+    "    # Build the dataset with the features and one hot encoded labels\n",
+    "    dataset = tf.data.Dataset.from_tensor_slices((features, one_hot_labels))\n",
+    "    \n",
+    "    # Batch the dataset (let's choose a batch size of 16)\n",
+    "    batched_dataset = dataset.batch(16)\n",
+    "\n",
+    "    ### END CODE HERE ###\n",
+    "\n",
+    "    return batched_dataset\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 138,
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "23DolaBRaIAZ"
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Example:\n",
+      "\n",
+      "N grams:\n",
+      "\n",
+      " [[   0    0    0    0   35]\n",
+      " [   0    0    0   35  489]\n",
+      " [   0    0   35  489 1259]\n",
+      " [   0   35  489 1259  164]\n",
+      " [  35  489 1259  164  230]]\n",
+      "\n",
+      "Label shape:\n",
+      "\n",
+      " (5, 3189)\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Test your function with the padded n_grams_seq of the first example\n",
+    "dataset_example = features_and_labels_dataset(first_padded_seq, total_words)\n",
+    "\n",
+    "print(\"Example:\\n\")\n",
+    "for features, label in dataset_example.take(1):\n",
+    "    print(f\"N grams:\\n\\n {features}\\n\")\n",
+    "    print(f\"Label shape:\\n\\n {label.shape}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "7t4yAx2UaQ43"
+   },
+   "source": [
+    "**Expected Output:**\n",
+    "\n",
+    "```\n",
+    "Example:\n",
+    "\n",
+    "N grams:\n",
+    "\n",
+    " [[   0    0    0    0   35]\n",
+    " [   0    0    0   35  489]\n",
+    " [   0    0   35  489 1259]\n",
+    " [   0   35  489 1259  164]\n",
+    " [  35  489 1259  164  230]]\n",
+    "\n",
+    "Label shape:\n",
+    "\n",
+    " (5, 3189)\n",
+    "```"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 139,
+   "metadata": {
+    "deletable": false,
+    "editable": false
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "\u001b[92m All tests passed!\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Test your code!\n",
+    "unittests.test_features_and_labels_dataset(features_and_labels_dataset)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false
+   },
+   "source": [
+    "Now let's generate the whole dataset that will be used for training. In this case, let's use the [.prefetch](https://www.tensorflow.org/api_docs/python/tf/data/Dataset#prefetch) method to speed up the training. Since the dataset is not that big, you should not have problems with memory by doing this. "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 140,
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "GRTuLEt3bRKa"
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Feature shape: TensorSpec(shape=(None, 10), dtype=tf.int32, name=None)\n",
+      "Label shape: TensorSpec(shape=(None, 3189), dtype=tf.float64, name=None)\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Split the whole corpus\n",
+    "dataset = features_and_labels_dataset(input_sequences, total_words).prefetch(tf.data.AUTOTUNE)\n",
+    "\n",
+    "print(f\"Feature shape: {dataset.element_spec[0]}\")\n",
+    "print(f\"Label shape: {dataset.element_spec[1]}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "xXSMK_HpdLns"
+   },
+   "source": [
+    "**Expected Output:**\n",
+    "\n",
+    "```\n",
+    "Feature shape: TensorSpec(shape=(None, 10), dtype=tf.int32, name=None)\n",
+    "Label shape: TensorSpec(shape=(None, 3189), dtype=tf.float32, name=None)\n",
+    "```"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "ltxaOCE_aU6J"
+   },
+   "source": [
+    "## Exercise 5: create_model\n",
+    "\n",
+    "Now you should define a model architecture capable of achieving an accuracy of at least 80%.\n",
+    "\n",
+    "Some hints to help you in this task:\n",
+    "\n",
+    "- The first layer in your model must be an [Input](https://www.tensorflow.org/api_docs/python/tf/keras/Input) layer with the appropriate parameters, remember that your input are vectors with a fixed length size. Be careful with the size value you should pass as you've removed the last element of every input to be the label.\n",
+    "\n",
+    "- An appropriate `output_dim` for the first layer (Embedding) is 100, this is already provided for you.\n",
+    "- A Bidirectional LSTM is helpful for this particular problem.\n",
+    "- The last layer should have the same number of units as the total number of words in the corpus and a softmax activation function.\n",
+    "- This problem can be solved with only two layers (excluding the Embedding and Input) so try out small architectures first.\n",
+    "- 30 epochs should be enough to get an accuracy higher than 80%, if this is not the case try changing the architecture of your model."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 141,
+   "metadata": {
+    "cellView": "code",
+    "deletable": false,
+    "id": "XrE6kpJFfvRY",
+    "tags": [
+     "graded"
+    ]
+   },
+   "outputs": [],
+   "source": [
+    "# GRADED FUNCTION: create_model\n",
+    "\n",
+    "def create_model(total_words, max_sequence_len):\n",
+    "    \"\"\"\n",
+    "    Creates a text generator model\n",
+    "    \n",
+    "    Args:\n",
+    "        total_words (int): size of the vocabulary for the Embedding layer input\n",
+    "        max_sequence_len (int): length of the input sequences\n",
+    "    \n",
+    "    Returns:\n",
+    "       (tf.keras Model): the text generator model\n",
+    "    \"\"\"\n",
+    "    model = tf.keras.Sequential()\n",
+    "\n",
+    "    ### START CODE HERE ###\n",
+    "    # Input layer (you can specify the input shape here directly)\n",
+    "    model.add(tf.keras.layers.InputLayer(input_shape=(max_sequence_len - 1,)))\n",
+    "    \n",
+    "    # Embedding layer\n",
+    "    model.add(tf.keras.layers.Embedding(input_dim=total_words, output_dim=100))\n",
+    "    \n",
+    "    # Bidirectional LSTM layer\n",
+    "    model.add(tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(150)))\n",
+    "    \n",
+    "    # Dense layer with softmax activation (output should be total_words units)\n",
+    "    model.add(tf.keras.layers.Dense(total_words, activation='softmax'))\n",
+    "    ### END CODE HERE ###\n",
+    "    \n",
+    "    # Compile the model\n",
+    "    model.compile(loss='categorical_crossentropy',\n",
+    "                  optimizer='adam',\n",
+    "                  metrics=['accuracy'])    ### END CODE HERE ###\n",
+    "\n",
+    "    return model"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "The next cell allows you to check the number of total and trainable parameters of your model and prompts a warning in case these exceeds those of a reference solution, this serves the following 3 purposes listed in order of priority:\n",
+    "\n",
+    "- Helps you prevent crashing the kernel during training.\n",
+    "\n",
+    "- Helps you avoid longer-than-necessary training times.\n",
+    "- Provides a reasonable estimate of the size of your model. In general you will usually prefer smaller models given that they accomplish their goal successfully.\n",
+    "\n",
+    "**Notice that this is just informative** and may be very well below the actual limit for size of the model necessary to crash the kernel. So even if you exceed this reference you are probably fine. However, **if the kernel crashes during training or it is taking a very long time and your model is larger than the reference, come back here and try to get the number of parameters closer to the reference.**"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 142,
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "0IpX_Gu_gISk",
+    "tags": []
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "\u001b[92mYour model has 1,579,989 total parameters and the reference is 2,000,000\u001b[92m. You are good to go!\n",
+      "\n",
+      "\u001b[92mYour model has 1,579,989 trainable parameters and the reference is 2,000,000\u001b[92m. You are good to go!\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Get the untrained model\n",
+    "model = create_model(total_words, max_sequence_len)\n",
+    "\n",
+    "# Check the parameter count against a reference solution\n",
+    "unittests.parameter_count(model)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 143,
+   "metadata": {
+    "deletable": false,
+    "editable": false
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "predictions have shape: (16, 3189)\n"
+     ]
+    }
+   ],
+   "source": [
+    "example_batch = dataset.take(1)\n",
+    "\n",
+    "try:\n",
+    "\tmodel.evaluate(example_batch, verbose=False)\n",
+    "except:\n",
+    "\tprint(\"Your model is not compatible with the dataset you defined earlier. Check that the loss function and last layer are compatible with one another.\")\n",
+    "else:\n",
+    "\tpredictions = model.predict(example_batch, verbose=False)\n",
+    "\tprint(f\"predictions have shape: {predictions.shape}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false
+   },
+   "source": [
+    "**Expected output:**\n",
+    "\n",
+    "```\n",
+    "predictions have shape: (NUM_BATCHES, 3189)\n",
+    "```\n",
+    "\n",
+    "Where `NUM_BATCHES` is the number of batches you have set to your dataset."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 144,
+   "metadata": {
+    "deletable": false,
+    "editable": false
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "\u001b[92m All tests passed!\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Test your code!\n",
+    "unittests.test_create_model(create_model)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 145,
+   "metadata": {
+    "deletable": false
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Epoch 1/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m7s\u001b[0m 6ms/step - accuracy: 0.0260 - loss: 7.0504\n",
+      "Epoch 2/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.0304 - loss: 6.1212\n",
+      "Epoch 3/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.0399 - loss: 5.7140\n",
+      "Epoch 4/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.0476 - loss: 5.4187\n",
+      "Epoch 5/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m6s\u001b[0m 6ms/step - accuracy: 0.0542 - loss: 5.2929\n",
+      "Epoch 6/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.0659 - loss: 5.0795\n",
+      "Epoch 7/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.0742 - loss: 4.9259\n",
+      "Epoch 8/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.0910 - loss: 4.6883\n",
+      "Epoch 9/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.1122 - loss: 4.4186\n",
+      "Epoch 10/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.1449 - loss: 4.1664\n",
+      "Epoch 11/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m6s\u001b[0m 6ms/step - accuracy: 0.1828 - loss: 3.9041\n",
+      "Epoch 12/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m6s\u001b[0m 6ms/step - accuracy: 0.2489 - loss: 3.5550\n",
+      "Epoch 13/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.3165 - loss: 3.2265\n",
+      "Epoch 14/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.3877 - loss: 2.8874\n",
+      "Epoch 15/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.4296 - loss: 2.6630\n",
+      "Epoch 16/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.4802 - loss: 2.4354\n",
+      "Epoch 17/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.5384 - loss: 2.1879\n",
+      "Epoch 18/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m6s\u001b[0m 6ms/step - accuracy: 0.5838 - loss: 1.9918\n",
+      "Epoch 19/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m6s\u001b[0m 6ms/step - accuracy: 0.6243 - loss: 1.7911\n",
+      "Epoch 20/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.6682 - loss: 1.5910\n",
+      "Epoch 21/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.6995 - loss: 1.4423\n",
+      "Epoch 22/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m6s\u001b[0m 6ms/step - accuracy: 0.7169 - loss: 1.3685\n",
+      "Epoch 23/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.7405 - loss: 1.2627\n",
+      "Epoch 24/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m6s\u001b[0m 6ms/step - accuracy: 0.7562 - loss: 1.1674\n",
+      "Epoch 25/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.7862 - loss: 1.0507\n",
+      "Epoch 26/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.8104 - loss: 0.9495\n",
+      "Epoch 27/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.7931 - loss: 0.9710\n",
+      "Epoch 28/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.8240 - loss: 0.8544\n",
+      "Epoch 29/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m5s\u001b[0m 6ms/step - accuracy: 0.8483 - loss: 0.7540\n",
+      "Epoch 30/30\n",
+      "\u001b[1m960/960\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m6s\u001b[0m 6ms/step - accuracy: 0.8492 - loss: 0.7304\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Train the model\n",
+    "history = model.fit(dataset, epochs=30, verbose=1)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "gy72RPgly55q"
+   },
+   "source": [
+    "**To pass this assignment, your model should achieve a training accuracy of at least 80%**. If your model didn't achieve this threshold, try training again with a different model architecture. Consider increasing the number of units in your `LSTM` layer."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 147,
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "1fXTEO3GJ282",
+    "tags": []
+   },
+   "outputs": [
+    {
+     "data": {
+      "image/png": "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",
+      "text/plain": [
+       "<Figure size 1000x500 with 2 Axes>"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    }
+   ],
+   "source": [
+    "# Get training and validation accuracies\n",
+    "acc = history.history['accuracy']\n",
+    "loss = history.history['loss']\n",
+    "\n",
+    "# Get number of epochs\n",
+    "epochs = range(len(acc))\n",
+    "\n",
+    "fig, ax = plt.subplots(1, 2, figsize=(10, 5))\n",
+    "fig.suptitle('Training performance - Accuracy and Loss')\n",
+    "\n",
+    "for i, (data, label) in enumerate(zip([acc,loss], [\"Accuracy\", \"Loss\"])):\n",
+    "    ax[i].plot(epochs, data, label=label)\n",
+    "    ax[i].legend()\n",
+    "    ax[i].set_xlabel('epochs')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "OjvED5A3qrn2"
+   },
+   "source": [
+    "If the accuracy meets the requirement of being greater than 80%, then save the `history.pkl` file which contains the information of the training history of your model and will be used to compute your grade. You can do this by running the following code:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 148,
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "9QRG73l6qE-c",
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "with open('history.pkl', 'wb') as f:\n",
+    "    pickle.dump(history.history, f)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "wdsMszk9zBs_"
+   },
+   "source": [
+    "## See your model in action\n",
+    "\n",
+    "After all your work it is finally time to see your model generating text. \n",
+    "\n",
+    "Run the cell below to generate the next 100 words of a seed text.\n",
+    "\n",
+    "After submitting your assignment you are encouraged to try out training for different amounts of epochs and seeing how this affects the coherency of the generated text. Also try changing the seed text to see what you get!"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "deletable": false,
+    "id": "6Vc6PHgxa6Hm",
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "seed_text = \"Help me Obi Wan Kenobi, you're my only hope\"\n",
+    "next_words = 100\n",
+    "  \n",
+    "for _ in range(next_words):\n",
+    "    # Convert the text into sequences\n",
+    "    token_list = vectorizer(seed_text)\n",
+    "    # Pad the sequences\n",
+    "    token_list = tf.keras.utils.pad_sequences([token_list], maxlen=max_sequence_len-1, padding='pre')\n",
+    "    # Get the probabilities of predicting a word\n",
+    "    predicted = model.predict([token_list], verbose=0)\n",
+    "    # Choose the next word based on the maximum probability\n",
+    "    predicted = np.argmax(predicted, axis=-1).item()\n",
+    "    # Get the actual word from the word index\n",
+    "    output_word = vectorizer.get_vocabulary()[predicted]\n",
+    "    # Append to the current text\n",
+    "    seed_text += \" \" + output_word\n",
+    "\n",
+    "print(seed_text)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "deletable": false,
+    "editable": false,
+    "id": "6r-X-HXtSc8N"
+   },
+   "source": [
+    "**Congratulations on finishing this week's assignment!**\n",
+    "\n",
+    "You have successfully implemented a neural network capable of predicting the next word in a sequence of text!\n",
+    "\n",
+    "**We hope to see you in the next course of the specialization! Keep it up!**"
+   ]
+  }
+ ],
+ "metadata": {
+  "accelerator": "GPU",
+  "colab": {
+   "provenance": []
+  },
+  "dlai_version": "1.2.0",
+  "grader_version": "1",
+  "jupytext": {
+   "main_language": "python"
+  },
+  "kernelspec": {
+   "display_name": "Python 3 (ipykernel)",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.11.0rc1"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
